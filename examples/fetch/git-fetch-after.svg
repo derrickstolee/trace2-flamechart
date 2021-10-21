@@ -1,0 +1,24 @@
+<svg width="328.8" height="320">
+<style>
+.box { font: 16px sans-serif; }
+.axis { font: 12px sans-serif; }
+</style>
+<line x1="0" y1="0" x2="0" y2="320" style="stroke-width:1; stroke:black;" />
+<text class="axis" x="3" y="10">0s</text>
+<line x1="100" y1="0" x2="100" y2="320" style="stroke-width:1; stroke:black;" />
+<text class="axis" x="103" y="10">1s</text>
+<line x1="200" y1="0" x2="200" y2="320" style="stroke-width:1; stroke:black;" />
+<text class="axis" x="203" y="10">2s</text>
+<line x1="300" y1="0" x2="300" y2="320" style="stroke-width:1; stroke:black;" />
+<text class="axis" x="303" y="10">3s</text>
+<rect width="20" height="50" x="73.4" y="160" style="fill:rgb(200,66.66666666666667,66.66666666666667);stroke-width:3;stroke:rgb(50,50,50)" />
+<text class="box" x="78.4" y="200">gvfs-helper:(cs)</text>
+<rect width="171.10000000000002" height="50" x="136.9" y="110" style="fill:rgb(225,75,75);stroke-width:3;stroke:rgb(75,75,75)" />
+<text class="box" x="141.9" y="150">fetch:remote_refs</text>
+<rect width="192.90000000000003" height="50" x="134.8" y="160" style="fill:rgb(200,66.66666666666667,66.66666666666667);stroke-width:3;stroke:rgb(50,50,50)" />
+<text class="box" x="139.8" y="200">/usr/local/libexec/git-core/git remote-https origin https://dev.azure.com/office/_git/office</text>
+<rect width="126.30000000000001" height="50" x="7.4" y="210" style="fill:rgb(175,58.333333333333336,58.333333333333336);stroke-width:3;stroke:rgb(25,25,25)" />
+<text class="box" x="12.4" y="250">gh-client:objects/prefetch</text>
+<rect width="328.80000000000007" height="50" x="0" y="210" style="fill:rgb(175,58.333333333333336,58.333333333333336);stroke-width:3;stroke:rgb(25,25,25)" />
+<text class="box" x="5" y="250">git fetch</text>
+</svg>
