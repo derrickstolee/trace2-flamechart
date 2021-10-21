@@ -80,6 +80,8 @@ rl.on('close', function() {
         const width = total_time / width_divisor;
 
         let stack = [];
+        let last_at_depth = {};
+
         for (let i = 0; i < line_objs.length; i++) {
                 let obj = line_objs[i];
 
@@ -125,20 +127,34 @@ rl.on('close', function() {
 
                         let w = width * (region_end - region_start) / total_time;
 
-                        if (w < 50) {
-                                continue;
-                        }
-
                         let rect = {
                                 "label": obj.row_label,
                                 "start": region_start,
                                 "end": region_end,
                                 "depth": depth,
+                                "multiple": 1,
                         };
 
                         max_depth = Math.max(depth, max_depth);
-                        rectangles.push(rect);
+
+                        if (last_at_depth[depth] != null) {
+                                let last = last_at_depth[depth];
+                                if (last.label != rect.label) {
+                                        rectangles.push(last);
+                                } else {
+                                        rect.width = rect.width + rect.x - last.x;
+                                        rect.x = last.x;
+                                        rect.multiple = last.multiple + 1;
+                                        console.log("<!-- joining " + last.label + " with multiple " + rect.multiple + " -->");
+                                }
+                        }
+
+                        last_at_depth[depth] = rect;
                 }
+        }
+
+        for (const [key, value] of Object.entries(last_at_depth)) {
+                rectangles.push(value);
         }
 
         const row_height = 50;
@@ -158,9 +174,13 @@ rl.on('close', function() {
         for (let i = 0; i < rectangles.length; i++) {
                 let rect = rectangles[i];
 
+                if (rect.multiple > 1) {
+                        rect.label = rect.label + " (" + rect.multiple + ")";
+                }
+
                 let w = width * (rect.end - rect.start) / total_time;
 
-                if (w < 50) {
+                if (w < 10) {
                         continue;
                 }
 
