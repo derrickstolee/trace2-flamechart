@@ -1,14 +1,14 @@
 {
-  "name": "trace2-flamegraph",
+  "name": "trace2-flamechart",
   "version": "1.0.0",
-  "description": "convert Git trace2 regions to a flamegraph",
+  "description": "Generate flamecharts from Git trace2 regions",
   "main": "bin/index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/derrickstolee/trace2-flamegraph.git"
+    "url": "git+https://github.com/derrickstolee/trace2-flamechart.git"
   },
   "keywords": [
     "git",
@@ -19,9 +19,9 @@
   "author": "Derrick Stolee",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/derrickstolee/trace2-flamegraph/issues"
+    "url": "https://github.com/derrickstolee/trace2-flamechart/issues"
   },
-  "homepage": "https://github.com/derrickstolee/trace2-flamegraph#readme",
+  "homepage": "https://github.com/derrickstolee/trace2-flamechart#readme",
   "bin": {
     "execute": "bin/index.js"
   }
