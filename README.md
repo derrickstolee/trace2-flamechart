@@ -6,6 +6,7 @@ You can generate trace2 event data for a Git command as follows:
 ```
 GIT_TRACE2_EVENT="$(pwd)/trace.txt" \
         GIT_TRACE2_EVENT_DEPTH=100 \
+        GIT_TRACE2_EVENT_BRIEF=false \
         git <arguments>
 ```
 
