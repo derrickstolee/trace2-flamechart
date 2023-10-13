@@ -159,7 +159,7 @@ rl.on('close', function() {
 
         const row_height = 50;
         const height = 70 + row_height * (max_depth + 1);
-        console.log("<svg width=\"" + width + "\" height=\"" + height + "\">");
+        console.log("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" + width + "\" height=\"" + height + "\">");
 
         console.log("<style>");
         console.log(".box { font: 16px sans-serif; }");
