@@ -145,7 +145,6 @@ rl.on('close', function() {
                                         rect.width = rect.width + rect.x - last.x;
                                         rect.x = last.x;
                                         rect.multiple = last.multiple + 1;
-                                        console.log("<!-- joining " + last.label + " with multiple " + rect.multiple + " -->");
                                 }
                         }
 
