@@ -28,30 +28,149 @@ events.add("region_enter");
 events.add("region_leave");
 events.add("start");
 events.add("exit");
+events.add("child_start");
+events.add("child_exit");
 
 const line_objs = [];
 let active = true;
-let nesting = 0;
-let first_pass_stack = [];
+
+function parseWallClockTime(time) {
+        let match = /^(\d+):(\d+):(\d+)(?:\.(\d+))?$/.exec(time);
+        if (!match) {
+                return NaN;
+        }
+
+        let [, hours, minutes, seconds, fraction] = match;
+        let millis = 1000 * (3600 * Number(hours) + 60 * Number(minutes) + Number(seconds));
+
+        if (fraction) {
+                millis += Number(("0." + fraction)) * 1000;
+        }
+
+        return millis;
+}
+
+function parsePipeLine(line) {
+        let parts = line.split('|').map(part => part.trim());
+        if (parts.length < 4) {
+                return null;
+        }
+
+        let [time] = parts[0].split(/\s+/);
+        let obj = {
+                "time": time,
+                "ms_time": parseWallClockTime(time),
+                "sid": parts[1],
+                "thread": parts[2],
+                "event": parts[3],
+                "nesting": Number((parts[4] || '').replace(/^r/, '')),
+                "category": parts[7] || '',
+                "detail": parts.slice(8).join('|').trim(),
+        };
+
+        let child = /\[ch(\d+)\]/.exec(obj.detail);
+        if (child) {
+                obj.child_id = Number(child[1]);
+        }
+
+        let label = /(?:^|\.+)label:(.*)$/.exec(obj.detail);
+        if (label) {
+                obj.label = label[1];
+        }
+
+        let argv = /argv:\[(.*)\]$/.exec(obj.detail);
+        if (argv) {
+                obj.argv = [argv[1]];
+        } else if (obj.event == "start" && obj.detail) {
+                obj.argv = [obj.detail];
+        }
+
+        return obj;
+}
+
+function parseLine(line) {
+        if (line[0] == '{') {
+                let obj = JSON.parse(line);
+                obj.ms_time = Date.parse(obj.time);
+                return obj;
+        }
+
+        return parsePipeLine(line);
+}
+
+function processDepth(sid) {
+        if (!sid) {
+                return 0;
+        }
+
+        if (/^d\d+$/.test(sid)) {
+                return Number(sid.substring(1));
+        }
+
+        return sid.split('/').length - 1;
+}
+
+function keyFor(obj) {
+        return (obj.sid || '') + '|' + (obj.thread || '');
+}
+
+function childKeyFor(obj) {
+        return keyFor(obj) + '|' + (obj.child_id == null ? '' : obj.child_id);
+}
+
+function argvLabel(obj) {
+        if (!obj.argv) {
+                return obj.detail || obj.event;
+        }
+
+        return Array.isArray(obj.argv) ? obj.argv.join(' ') : obj.argv;
+}
+
+function regionLabel(obj) {
+        if (obj.category && obj.label) {
+                return obj.category + ":" + obj.label;
+        }
+
+        return obj.label || obj.category || obj.event;
+}
+
+function isSkippedProcess(obj) {
+        let label = argvLabel(obj);
+        return label.includes("gvfs-helper");
+}
+
+function escapeXml(value) {
+        return String(value)
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&apos;");
+}
 
 rl.on('line', function(line) {
         if (!active) {
                 return;
         }
 
-        let obj = JSON.parse(line);
-        if (events.has(obj.event)) {
-                obj.ms_time = Date.parse(obj.time);
-                line_objs.push(obj);
+        line = line.trim();
+        if (!line) {
+                return;
+        }
 
-                if (obj.event == "start" || obj.event == "region_enter") {
-                        first_pass_stack.push(obj);
-                        nesting = Math.max(nesting, first_pass_stack.length);
-                }
+        let obj = parseLine(line);
+        if (obj && events.has(obj.event) && !Number.isNaN(obj.ms_time)) {
+                line_objs.push(obj);
         }
 });
 
 rl.on('close', function() {
+        if (!line_objs.length) {
+                console.error("No supported trace2 events found.");
+                process.exitCode = 1;
+                return;
+        }
+
         const start = line_objs[0].ms_time;
         const end = line_objs[line_objs.length - 1].ms_time;
         const total_time = end - start;
@@ -75,85 +194,115 @@ rl.on('close', function() {
 
         const rectangles = [];
 
-        let depth = 0;
         let max_depth = 0;
         const width = total_time / width_divisor;
 
-        let stack = [];
+        let process_starts = {};
+        let region_stacks = {};
+        let child_starts = {};
         let last_at_depth = {};
+
+        function addRectangle(rect) {
+                if (rect.end <= rect.start) {
+                        return;
+                }
+
+                let last = last_at_depth[rect.depth];
+                if (last &&
+                    last.label == rect.label &&
+                    last.is_child == rect.is_child &&
+                    Math.abs(last.end - rect.start) < 0.001) {
+                        last.end = rect.end;
+                        last.multiple++;
+                        return;
+                }
+
+                rectangles.push(rect);
+                last_at_depth[rect.depth] = rect;
+                max_depth = Math.max(rect.depth, max_depth);
+        }
 
         for (let i = 0; i < line_objs.length; i++) {
                 let obj = line_objs[i];
+                let key = keyFor(obj);
 
                 if (obj.event == "start") {
-                        // Skip over long-lived branches
-                        if (!obj.argv[0].includes("gvfs-helper") &&
-                            (obj.argv.length < 2 || !obj.argv[1].includes("gvfs-helper"))) {
-                                depth++;
-                        }
-                        stack.push(obj);
+                        process_starts[obj.sid || key] = obj;
                         continue;
                 }
 
                 if (obj.event == "region_enter") {
+                        let stack = region_stacks[key];
+                        if (!stack) {
+                                stack = [];
+                                region_stacks[key] = stack;
+                        }
+
+                        obj.depth = processDepth(obj.sid) + (obj.nesting || stack.length + 1);
                         stack.push(obj);
-                        depth++;
                         continue;
                 }
 
-                if (obj.event == "region_leave" || obj.event == "exit") {
-                        let top = stack.pop();
-
-                        if (top.event == "start" &&
-                            (top.argv[0].includes("gvfs-helper") ||
-                               (top.argv.length > 1 && top.argv[1].includes("gvfs-helper")))) {
-                                continue;
-                        }
-
-                        if (obj.event == "region_leave") {
-                                obj.row_label = obj.category + ":" + obj.label;
-                        } else if (top.event == "start") {
-                                obj.row_label = top.argv.join(' ');
-                        } else {
-                                // Mismatched, so skip over this one.
-                                // Likely due to a long-lived child.
-                                continue;
-                        }
-
-                        depth--;
-
-                        let region_start = top.ms_time;
-                        let region_end = obj.ms_time;
-
-                        let w = width * (region_end - region_start) / total_time;
-
-                        let rect = {
-                                "label": obj.row_label,
-                                "start": region_start,
-                                "end": region_end,
-                                "depth": depth,
-                                "multiple": 1,
-                        };
-
-                        max_depth = Math.max(depth, max_depth);
-
-                        if (last_at_depth[depth] != null) {
-                                let last = last_at_depth[depth];
-                                if (last.label != rect.label) {
-                                        rectangles.push(last);
-                                } else {
-                                        rect.width = rect.width + rect.x - last.x;
-                                        rect.x = last.x;
-                                        rect.multiple = last.multiple + 1;
-                                }
-                        }
-
-                        last_at_depth[depth] = rect;
+                if (obj.event == "child_start") {
+                        let stack = region_stacks[key] || [];
+                        obj.depth = processDepth(obj.sid) + stack.length + 1;
+                        child_starts[childKeyFor(obj)] = obj;
+                        continue;
                 }
-        }
 
-        for (const [key, value] of Object.entries(last_at_depth)) {
-                rectangles.push(value);
+                if (obj.event == "region_leave") {
+                        let stack = region_stacks[key];
+                        if (!stack || !stack.length) {
+                                continue;
+                        }
+
+                        let top = stack.pop();
+                        addRectangle({
+                                "label": regionLabel(obj),
+                                "start": top.ms_time,
+                                "end": obj.ms_time,
+                                "depth": top.depth,
+                                "multiple": 1,
+                                "is_child": false,
+                        });
+
+                        continue;
+                }
+
+                if (obj.event == "child_exit") {
+                        let top = child_starts[childKeyFor(obj)];
+                        if (!top) {
+                                continue;
+                        }
+
+                        delete child_starts[childKeyFor(obj)];
+                        addRectangle({
+                                "label": argvLabel(top),
+                                "start": top.ms_time,
+                                "end": obj.ms_time,
+                                "depth": top.depth,
+                                "multiple": 1,
+                                "is_child": true,
+                        });
+
+                        continue;
+                }
+
+                if (obj.event == "exit") {
+                        let top = process_starts[obj.sid || key];
+                        if (!top || isSkippedProcess(top)) {
+                                continue;
+                        }
+
+                        addRectangle({
+                                "label": argvLabel(top),
+                                "start": top.ms_time,
+                                "end": obj.ms_time,
+                                "depth": processDepth(top.sid),
+                                "multiple": 1,
+                                "is_child": false,
+                        });
+                }
         }
 
         const row_height = 50;
@@ -186,15 +335,22 @@ rl.on('close', function() {
                 let x = width * (rect.start - start) / total_time;
                 let y = height - 10 - (row_height * (rect.depth + 1));
 
-                let fillShade = 150 + 100 * (rect.depth / max_depth);
-                let borderShade = 100 * (rect.depth / max_depth);
-                let fillColor = "rgb(" + fillShade + "," + (fillShade / 3) + "," + (fillShade / 3) + ")";
-                let borderColor = "rgb(" + borderShade + "," + borderShade + "," + borderShade + ")";
+                let depthRatio = max_depth ? rect.depth / max_depth : 0;
+                let fillShade = 150 + 100 * depthRatio;
+                let borderShade = 100 * depthRatio;
+                let fillColor, borderColor;
+                if (rect.is_child) {
+                        fillColor = "rgb(" + (fillShade / 3) + "," + (fillShade / 3) + "," + fillShade + ")";
+                        borderColor = "rgb(" + borderShade + "," + borderShade + "," + borderShade + ")";
+                } else {
+                        fillColor = "rgb(" + fillShade + "," + (fillShade / 3) + "," + (fillShade / 3) + ")";
+                        borderColor = "rgb(" + borderShade + "," + borderShade + "," + borderShade + ")";
+                }
 
                 let style = "fill:" + fillColor + ";stroke-width:3;stroke:" + borderColor;
 
                 console.log("<rect width=\"" + w + "\" height=\"" + row_height + "\" x=\"" + x + "\" y=\"" + y + "\" style=\"" + style + "\" />");
-                console.log("<text class=\"box\" x=\"" + (x + 5) + "\" y=\"" + (y + 0.8 * row_height) + "\">" + rect.label + "</text>");
+                console.log("<text class=\"box\" x=\"" + (x + 5) + "\" y=\"" + (y + 0.8 * row_height) + "\">" + escapeXml(rect.label) + "</text>");
         }
 
         console.log("</svg>");
